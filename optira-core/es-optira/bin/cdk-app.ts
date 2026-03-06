@@ -6,6 +6,7 @@ const app = new App();
 
 // prettier-ignore
 new OptiraAgentLambdaStack(app, "OptiraAgentLambdaStack", {
+  description: "Guidance for Generating Support Case Insights Using GenAI Services on AWS (SO9667)",
   /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,
    * but a single synthesized template can be deployed anywhere. */

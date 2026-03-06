@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Optira Cognito User Pool'
+Description: 'Guidance for Generating Support Case Insights Using GenAI Services on AWS (SO9667)'
 
 Parameters:
   StackName:

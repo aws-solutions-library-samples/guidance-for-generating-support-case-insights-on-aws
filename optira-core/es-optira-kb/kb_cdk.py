@@ -9,7 +9,9 @@ from constructs import Construct
 class OptiraKnowledgeBaseStack(Stack):
     """CDK Stack for Amazon Bedrock Knowledge Base infrastructure"""
     
-    def __init__(self, scope: Construct, id: str, bucket_name: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, id: str, bucket_name: str, description: str = None, **kwargs) -> None:
+        if description:
+            kwargs['description'] = description
         super().__init__(scope, id, **kwargs)
         
         # Reference existing S3 bucket
@@ -110,5 +112,10 @@ if __name__ == "__main__":
         
     bucket_name = sys.argv[1]
     app = App()
-    OptiraKnowledgeBaseStack(app, "OptiraKnowledgeBaseStack", bucket_name=bucket_name)
+    OptiraKnowledgeBaseStack(
+        app, 
+        "OptiraKnowledgeBaseStack", 
+        bucket_name=bucket_name,
+        description="Guidance for Generating Support Case Insights Using GenAI Services on AWS (SO9667)"
+    )
     app.synth()
