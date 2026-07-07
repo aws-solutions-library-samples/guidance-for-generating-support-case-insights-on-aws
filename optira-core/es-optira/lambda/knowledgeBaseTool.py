@@ -61,7 +61,6 @@ def query_model(prompt, retrieved_context):
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 2000,
-            "temperature": 0.5,
             "messages": [
                 {
                     "role": "user",

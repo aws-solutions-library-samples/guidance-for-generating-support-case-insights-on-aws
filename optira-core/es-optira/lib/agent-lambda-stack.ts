@@ -63,8 +63,8 @@ export class OptiraAgentLambdaStack extends Stack {
     
     OptiraAgentFunction.addEnvironment("ATHENA_DATABASE", "optira_database")
     OptiraAgentFunction.addEnvironment("ATHENA_OUTPUT_S3", `s3://${supportDataBucketName.valueAsString}/results/`)
-    OptiraAgentFunction.addEnvironment("BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-20250514-v1:0")
-    OptiraAgentFunction.addEnvironment("TRUSTED_ADVISOR_MODEL_ID", "global.anthropic.claude-sonnet-4-20250514-v1:0")
+    OptiraAgentFunction.addEnvironment("BEDROCK_MODEL_ID", "global.anthropic.claude-opus-4-7")
+    OptiraAgentFunction.addEnvironment("TRUSTED_ADVISOR_MODEL_ID", "global.anthropic.claude-opus-4-7")
     OptiraAgentFunction.addEnvironment("KNOWLEDGEBASE_ID", knowledgeBaseSecret.secretValueFromJson('knowledge_base_id').unsafeUnwrap())
     OptiraAgentFunction.addEnvironment("MAX_PARALLEL_TOOLS", "3")
     OptiraAgentFunction.addEnvironment("MAX_QUERY_EXECUTION_TIME", "300")

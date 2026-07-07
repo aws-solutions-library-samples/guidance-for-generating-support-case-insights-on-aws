@@ -15,8 +15,7 @@ def invoke_bedrock_api(prompt: str) -> Optional[str]:
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
         "messages": [{"role": "user", "content": combined_prompt}],
-        "max_tokens": MAX_TOKENS,
-        "temperature": 0.3
+        "max_tokens": MAX_TOKENS
     })
 
     try:

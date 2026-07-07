@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-PARSING_MODEL_ID="global.anthropic.claude-sonnet-4-20250514-v1:0"
+PARSING_MODEL_ID="global.anthropic.claude-opus-4-7"
 EMBEDDING_MODEL_ID="amazon.titan-embed-text-v2:0"
 
 class OptiraKnowledgeBase:
@@ -217,25 +217,75 @@ class OptiraKnowledgeBase:
         
         url = f"{endpoint}/{index_name}"
         logger.info(f"Creating index at URL: {url}")
-        
-        try:
-            response = requests.put(
-                url,
-                auth=awsauth,
-                json=index_mapping,
-                headers={"Content-Type": "application/json"},
-                timeout=30
+
+        # Create the index, retrying to absorb data-access-policy propagation delays (403s)
+        # and transient errors. A 2xx here does NOT mean the index is immediately queryable,
+        # since AOSS index creation is asynchronous and eventually consistent.
+        created = False
+        last_detail = ""
+        for attempt in range(1, 11):
+            try:
+                response = requests.put(
+                    url,
+                    auth=awsauth,
+                    json=index_mapping,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
+                last_detail = f"{response.status_code}, {response.text}"
+                logger.info(f"Index creation attempt {attempt}/10: {last_detail}")
+
+                if response.status_code in [200, 201]:
+                    logger.info(f"Successfully created vector index: {index_name}")
+                    created = True
+                    break
+                # Index already exists from a previous run -> treat as success
+                if response.status_code == 400 and "resource_already_exists_exception" in response.text:
+                    logger.info(f"Vector index already exists: {index_name}")
+                    created = True
+                    break
+                # 403 usually means the data access policy has not propagated yet
+                logger.warning(f"Index creation attempt {attempt} not successful, retrying in 15s...")
+            except Exception as e:
+                last_detail = str(e)
+                logger.warning(f"Exception during index creation attempt {attempt}: {last_detail}")
+            time.sleep(15)
+
+        if not created:
+            raise Exception(
+                f"Failed to create vector index '{index_name}' after retries. Last response: {last_detail}"
             )
-            
-            logger.info(f"Index creation response: {response.status_code}, {response.text}")
-            
-            if response.status_code in [200, 201]:
-                logger.info(f"Successfully created vector index: {index_name}")
-            else:
-                logger.error(f"Failed to create index: {response.text}")
-        except Exception as e:
-            logger.error(f"Exception during index creation: {str(e)}")
-        
+
+        # Verify the index is actually queryable before returning. Bedrock's CreateKnowledgeBase
+        # validates the index up front and fails with "no such index" if it is not yet visible.
+        logger.info("Verifying vector index is available...")
+        index_ready = False
+        for attempt in range(1, 21):
+            try:
+                check = requests.get(
+                    url,
+                    auth=awsauth,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
+                if check.status_code == 200:
+                    logger.info(f"Vector index '{index_name}' is available")
+                    index_ready = True
+                    break
+                logger.info(f"Index not visible yet (status {check.status_code}), attempt {attempt}/20")
+            except Exception as e:
+                logger.info(f"Index availability check attempt {attempt} error: {str(e)}")
+            time.sleep(15)
+
+        if not index_ready:
+            raise Exception(
+                f"Vector index '{index_name}' was created but did not become available in time"
+            )
+
+        # Extra settle time for eventual consistency before Bedrock validates the index
+        logger.info("Waiting for index to fully propagate before Knowledge Base creation...")
+        time.sleep(60)
+
         # 7. Update network policy to restrict access after index creation
         self.update_network_policy_for_bedrock(collection_name, unique_suffix)
         

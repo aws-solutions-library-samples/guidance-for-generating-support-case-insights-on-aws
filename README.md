@@ -63,7 +63,7 @@ The Data Collection Account refers to the central account that contains the supp
 
 ### Cost
 
-You are responsible for the cost of the AWS services used while running this Guidance. As of 2025, the cost for running this Guidance with the default settings in the US East (N. Virginia) Region is approximately $1,324.12 per month for processing moderate traffic levels.
+You are responsible for the cost of the AWS services used while running this Guidance. As of 2026, the cost for running this Guidance with the default settings in the US East (N. Virginia) Region is approximately $1,758.07 per month for processing moderate traffic levels.
 
 We recommend creating a [Budget](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html) through [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) to help manage costs. Prices are subject to change. For full details, refer to the pricing webpage for each AWS service used in this Guidance.
 
@@ -80,7 +80,7 @@ The following table provides a sample cost breakdown for deploying this Guidance
 |                              | Metadata Function                    | 3,000 invocations                  | $60.00             |
 |                              | Collector Function                   | 3,000 invocations                  | $60.00             |
 |                              | Support Collector (Member accounts)  | 3,000 invocations per account      | $60.00             |
-| Amazon Bedrock               | Claude 4 Sonnet Model                | 10,000 input/output tokens         | $648.00            |
+| Amazon Bedrock               | Claude Opus 4.7 Model                | 10,000 input/output tokens         | $1080.00            |
 |                              | Embedding Model (Titan)              | 10M tokens                         | $1.00              |
 | Amazon OpenSearch Serverless | Vector Storage                       | 10GB knowledge base/1 OCU          | $350.64            |
 | Amazon API Gateway           | REST API Calls                       | 5,000 calls                        | $17.50             |
@@ -92,7 +92,7 @@ The following table provides a sample cost breakdown for deploying this Guidance
 | AWS WAF (Optional)           | Web ACL Rules                        | 1M requests                        | $9.60              |
 | CloudWatch Logs              | Log Storage                          | 5GB                                | $2.50              |
 | AWS Support API              | API Calls                            | Included                           | $0.00              |
-| **Total**                    |                                      |                                    | **$1,324.12/month**|
+| **Total**                    |                                      |                                    | **$1,758.07/month**|
 
 ## Prerequisites
 
