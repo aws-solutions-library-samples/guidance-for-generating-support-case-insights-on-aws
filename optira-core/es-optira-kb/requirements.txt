@@ -1,5 +1,5 @@
 boto3>=1.28.0
 requests>=2.31.0
 requests-aws4auth>=1.2.0
-aws-cdk-lib==2.110.0  # Pin to a specific version for compatibility
+aws-cdk-lib==2.253.0  # Pin to a specific version for compatibility
 constructs>=10.0.0,<11.0.0
