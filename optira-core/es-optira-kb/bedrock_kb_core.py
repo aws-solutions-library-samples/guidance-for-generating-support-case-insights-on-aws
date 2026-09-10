@@ -321,18 +321,37 @@ class OptiraKnowledgeBase:
         except Exception as e:
             logger.warning(f"Failed to update network policy (non-critical): {str(e)}")
 
+    def _find_knowledge_base_id_by_name(self, kb_name):
+        """Return the id of an existing KB with this exact name, or None.
+
+        list_knowledge_bases is paginated (it returns only a subset per call),
+        so we must page through nextToken. Without this, an existing KB that is
+        not on the first page is missed -- causing a spurious "exists but cannot
+        be found" error and a destructive recreate on subsequent deploys.
+        """
+        next_token = None
+        while True:
+            kwargs = {"maxResults": 100}
+            if next_token:
+                kwargs["nextToken"] = next_token
+            response = self.bedrock_agent.list_knowledge_bases(**kwargs)
+            for kb in response.get("knowledgeBaseSummaries", []):
+                if kb.get("name") == kb_name:
+                    return kb["knowledgeBaseId"]
+            next_token = response.get("nextToken")
+            if not next_token:
+                return None
+
     def create_knowledge_base(self, role_arn, collection_arn):
         """Create or get existing Bedrock Knowledge Base"""
         kb_name = f"optira-support-case-kb"
         
-        # Check if knowledge base already exists
+        # Check if knowledge base already exists (paginated lookup by name)
         try:
-            kb_list = self.bedrock_agent.list_knowledge_bases()
-            for kb in kb_list['knowledgeBaseSummaries']:
-                if kb['name'] == kb_name:
-                    kb_id = kb['knowledgeBaseId']
-                    logger.info(f"Found existing Knowledge Base: {kb_name} with ID: {kb_id}")
-                    return kb_id
+            existing_id = self._find_knowledge_base_id_by_name(kb_name)
+            if existing_id:
+                logger.info(f"Found existing Knowledge Base: {kb_name} with ID: {existing_id}")
+                return existing_id
         except Exception as e:
             logger.warning(f"Error checking existing knowledge bases: {str(e)}")
         
@@ -365,14 +384,13 @@ class OptiraKnowledgeBase:
             kb_id = kb_response['knowledgeBase']['knowledgeBaseId']
             logger.info(f"Created new Knowledge Base with ID: {kb_id}")
         except ClientError as e:
-            if 'already exists' in str(e):
-                # Fallback: try to find by name again
-                kb_list = self.bedrock_agent.list_knowledge_bases()
-                for kb in kb_list['knowledgeBaseSummaries']:
-                    if kb['name'] == kb_name:
-                        kb_id = kb['knowledgeBaseId']
-                        logger.info(f"Using existing Knowledge Base: {kb_name} with ID: {kb_id}")
-                        return kb_id
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if 'already exists' in str(e) or error_code == 'ConflictException':
+                # Fallback: find by name again (paginated)
+                existing_id = self._find_knowledge_base_id_by_name(kb_name)
+                if existing_id:
+                    logger.info(f"Using existing Knowledge Base: {kb_name} with ID: {existing_id}")
+                    return existing_id
                 raise Exception(f"Knowledge Base {kb_name} exists but cannot be found")
             else:
                 raise

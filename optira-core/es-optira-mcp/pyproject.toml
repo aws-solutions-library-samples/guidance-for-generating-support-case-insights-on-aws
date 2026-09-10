@@ -1,0 +1,32 @@
+[project]
+name = "optira-mcp"
+version = "0.1.0"
+description = "MCP server exposing Optira AWS support-case insight tools (case metadata + knowledge base RAG)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Optira" }]
+dependencies = [
+    # Official MCP Python SDK (FastMCP). Pin <2: the v2 line ships breaking
+    # changes (stateless core / API changes). Bump deliberately after testing.
+    "mcp>=1.27,<2",
+    # Strands Agents SDK powers the optional composite orchestrator tool.
+    "strands-agents>=1.0,<2",
+    "boto3>=1.34.0",
+    # ASGI -> AWS Lambda/API Gateway adapter for the SigV4 deployment.
+    "mangum>=0.17,<1",
+]
+
+[project.scripts]
+optira-mcp = "optira_mcp.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["optira_mcp*"]
