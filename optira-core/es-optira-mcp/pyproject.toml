@@ -30,3 +30,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["optira_mcp*"]
+
+# Ship the Trusted Advisor check catalog (checkId -> name/description) so the
+# trusted_advisor tool can map recommendations to human-readable check names.
+[tool.setuptools.package-data]
+optira_mcp = ["ta_checks_info.json"]

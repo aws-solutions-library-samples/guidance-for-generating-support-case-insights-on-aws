@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
@@ -26,6 +27,47 @@ TA_PREFIX = "ta/"
 # Safety caps so a single response can't balloon.
 _DEFAULT_MAX_RECOMMENDATIONS = 50
 _MAX_FLAGGED_RESOURCES_PER_CHECK = 100
+
+# Maps a Trusted Advisor checkId -> {name, description}. Same static catalog the
+# collector uses (ta_checks_info.json), bundled here so the tool can turn the
+# opaque checkId into a human-readable check name/description.
+_CHECKS_INFO_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "ta_checks_info.json"
+)
+
+
+def _load_checks_info() -> Dict[str, Dict[str, Optional[str]]]:
+    try:
+        with open(_CHECKS_INFO_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return {
+            c["checkId"]: {"name": c.get("name"), "description": c.get("description")}
+            for c in data
+            if c.get("checkId")
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not load Trusted Advisor checks info: %s", exc)
+        return {}
+
+
+# Loaded once per process (the catalog is static).
+_CHECKS_INFO = _load_checks_info()
+
+
+def _normalize_resource(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten a flagged resource to a consistent shape with the ARN surfaced.
+
+    Handles the modern Trusted Advisor API shape (arn/awsResourceId/regionCode/
+    metadata map) and, defensively, the legacy Support API shape
+    (resourceId/region/metadata list).
+    """
+    return {
+        "arn": r.get("arn"),
+        "resource_id": r.get("awsResourceId") or r.get("resourceId"),
+        "region": r.get("regionCode") or r.get("region"),
+        "status": r.get("status"),
+        "metadata": r.get("metadata"),
+    }
 
 
 def _list_ta_keys(s3, bucket: str, prefix: str) -> List[str]:
@@ -51,6 +93,11 @@ def get_trusted_advisor_recommendations(
         max_results: Max number of recommendations (checks) to return.
 
     Returns a dict with ``count``, ``truncated`` and a ``recommendations`` list.
+    Each recommendation includes the mapped ``check_name`` and
+    ``check_description`` (resolved from the checkId), ``check_id``, ``status``,
+    ``recommendation_arn``, and ``flagged_resources`` -- where each flagged
+    resource carries its ``arn`` (plus ``resource_id``, ``region``, ``status``,
+    ``metadata``) for remediation.
     """
     settings = settings or get_settings()
     bucket = settings.support_data_bucket
@@ -80,14 +127,21 @@ def get_trusted_advisor_recommendations(
 
         rec = data.get("recommendation", {}) or {}
         flagged = rec.get("flaggedResources", []) or []
+        check_id = rec.get("checkId")
+        info = _CHECKS_INFO.get(check_id, {})
+        normalized = [_normalize_resource(r) for r in flagged]
         recommendations.append(
             {
                 "account_id": data.get("account_id"),
-                "check_id": rec.get("checkId"),
+                "check_id": check_id,
+                # Prefer the name stored by the collector; fall back to catalog.
+                "check_name": rec.get("name") or info.get("name"),
+                "check_description": info.get("description"),
                 "status": rec.get("status"),
-                "description": rec.get("description"),
+                "recommendation_arn": rec.get("recommendationArn"),
                 "flagged_resources_count": len(flagged),
-                "flagged_resources": flagged[:_MAX_FLAGGED_RESOURCES_PER_CHECK],
+                # Each resource surfaces its ARN (arn), resource_id, region.
+                "flagged_resources": normalized[:_MAX_FLAGGED_RESOURCES_PER_CHECK],
                 "flagged_resources_truncated": len(flagged)
                 > _MAX_FLAGGED_RESOURCES_PER_CHECK,
             }

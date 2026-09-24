@@ -31,6 +31,16 @@ export class OptiraCollectorStack extends Stack {
       description: 'Name of the Athena database'
     });
 
+    // Trusted Advisor statuses to collect. TA has no severity concept; its
+    // statuses are ok | warning | error, where "error" is the red/critical
+    // finding. Use "error" to collect only critical recommendations, or
+    // "warning,error" (default) for all actionable ones.
+    const taStatuses = new cdk.CfnParameter(this, 'TaStatuses', {
+      type: 'String',
+      default: 'warning,error',
+      description: 'Comma-separated Trusted Advisor statuses to collect (ok, warning, error). Use "error" for critical only.'
+    });
+
     const packagingDirectory = path.join(__dirname, "../packaging");
 
     const zipDependencies = path.join(packagingDirectory, "dependencies.zip");
@@ -88,6 +98,10 @@ export class OptiraCollectorStack extends Stack {
                 'support:ReopenCase',
                 'support:AddCommunicationToCase',
                 'support:DescribeTrustedAdvisorCheckRefreshStatuses',
+                // Modern Trusted Advisor API (returns per-resource ARNs)
+                'trustedadvisor:ListRecommendations',
+                'trustedadvisor:ListRecommendationResources',
+                'trustedadvisor:GetRecommendation',
                 'organizations:ListAccounts',
                 'sts:AssumeRole'
               ],
@@ -96,6 +110,7 @@ export class OptiraCollectorStack extends Stack {
           )
     OptiraCollectorFunction.addEnvironment("S3_BUCKET_NAME", supportDataBucketName.valueAsString)
     OptiraCollectorFunction.addEnvironment("S3_PREFIX", "support-cases")
+    OptiraCollectorFunction.addEnvironment("TA_STATUSES", taStatuses.valueAsString)
 
     OptiraCollectorFunction.addToRolePolicy(
     new iam.PolicyStatement({

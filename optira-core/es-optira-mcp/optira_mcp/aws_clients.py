@@ -39,3 +39,8 @@ def athena(region: str):
 def s3(region: str):
     """Client for Amazon S3 (reads Trusted Advisor recommendation objects)."""
     return _client("s3", region)
+
+
+def secrets_manager(region: str):
+    """Client for AWS Secrets Manager (resolves the Knowledge Base id)."""
+    return _client("secretsmanager", region)

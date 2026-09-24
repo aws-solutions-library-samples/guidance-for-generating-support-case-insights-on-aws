@@ -120,9 +120,10 @@ class OptiraMcpServerStack(Stack):
                 # to reconstruct a full communication thread (default 5 is too
                 # few for the DevOps Agent path).
                 "KB_MAX_RESULTS": str(kb_max_results),
-                "KNOWLEDGEBASE_ID": kb_secret.secret_value_from_json(
-                    "knowledge_base_id"
-                ).unsafe_unwrap(),
+                # The KB id is resolved at runtime from this secret (not baked
+                # at deploy time), so the MCP server picks up the current KB
+                # even when deployed after the KB is created or recreated.
+                "KB_SECRET_NAME": kb_secret_name,
             },
         )
 

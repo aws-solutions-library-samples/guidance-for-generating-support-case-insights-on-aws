@@ -115,7 +115,8 @@ def build_server(
         Returns:
             dict with ``count``, ``total_available``, ``truncated`` and a
             ``recommendations`` list. Each recommendation includes
-            ``account_id``, ``check_id``, ``status``, ``description``,
+            ``account_id``, ``check_id``, the mapped ``check_name`` and
+            ``check_description``, ``status``, ``description``,
             ``flagged_resources_count`` and ``flagged_resources``.
         """
         return _get_trusted_advisor_recommendations(

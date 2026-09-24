@@ -62,8 +62,7 @@ What this means for deployment:
 9. [Step 5 — Ask the agent](#step-5--ask-the-agent)
 10. [Configuration reference](#configuration-reference)
 11. [Troubleshooting](#troubleshooting)
-12. [Local development (stdio)](#local-development-stdio)
-13. [Security](#security)
+12. [Security](#security)
 
 ---
 
@@ -205,21 +204,16 @@ The `infra/` folder contains a Python CDK stack, `OptiraMcpServerStack`.
 The MCP server is an alternative to the REST API (`../es-optira`), not an
 add-on to it. To run **only the MCP interface**:
 
-1. Deploy the **shared data foundation** (once), skipping `../es-optira`:
-   - `../es-optira-collector`, `../es-optira-kb`, and
-     `../es-optira-data-pipeline` — each has its own CDK app; deploy them
-     individually (see their READMEs). This produces the S3 data, the
-     `case_metadata` table, and the `optira/knowledge-base-id` secret.
-   - `../deploy.sh` deploys these **plus** the REST API stack; if you don't want
-     the REST API, deploy the three data stacks individually and simply omit
-     `../es-optira`.
+1. Deploy the **shared data foundation** (once) by running `../deploy.sh` from
+   `optira-core/`. This produces the S3 data, the `case_metadata` table, and the
+   `optira/knowledge-base-id` secret.
 2. Deploy this package (Step 1 below). It stands entirely on its own on top of
    the data foundation.
 
 You can also deploy **both** interfaces side by side — they are independent and
 share only the data foundation. Nothing here changes or requires the REST API.
 
-### Option A — one command (recommended)
+### Deploy
 
 ```bash
 # from optira-core/es-optira-mcp
@@ -228,21 +222,6 @@ share only the data foundation. Nothing here changes or requires the REST API.
 
 `<support_bucket_name>` is the **same** S3 bucket the rest of Optira uses (the
 one holding `support-cases/` and where Athena writes `results/`).
-
-### Option B — step by step
-
-```bash
-cd infra
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# 1. Build the Lambda artifacts (app.zip + dependencies.zip)
-python3 bin/package_for_lambda.py
-
-# 2. Deploy
-cdk bootstrap
-cdk deploy --app "python3 app.py <support_bucket_name>" --require-approval never
-```
 
 ### Capture the stack outputs
 
@@ -319,7 +298,7 @@ runs them without an approval prompt.
 
 Add a short knowledge entry to your Agent Space so the agent reliably picks the
 right Optira tool for each kind of question. In the DevOps Agent console, add
-the following to your Agent Space knowledge / instructions:
+the following to your Agent Space knowledge / instructions / Chat AGENTS.md:
 
 ```
 If any ask about support cases, use MCP <your-mcp-server-name> server tool
@@ -373,7 +352,8 @@ CDK stack; the stack sets these for you):
 |---|---|---|
 | `AWS_REGION` | `us-east-1` | Set automatically in Lambda; falls back to `AWS_DEFAULT_REGION` locally |
 | `BEDROCK_MODEL_ID` | `global.anthropic.claude-opus-4-7` | Model for SQL generation and KB synthesis |
-| `KNOWLEDGEBASE_ID` | _(from secret)_ | Injected from `optira/knowledge-base-id` at deploy time |
+| `KB_SECRET_NAME` | `optira/knowledge-base-id` | Secrets Manager secret the Lambda reads the KB id from **at runtime** (JSON key `knowledge_base_id`) |
+| `KNOWLEDGEBASE_ID` | _(unset)_ | Optional override. If set, it wins over the secret |
 | `ATHENA_DATABASE` | `optira_database` | |
 | `ATHENA_OUTPUT_S3` | `s3://<bucket>/results/` | Athena query-results location |
 | `SUPPORT_DATA_BUCKET` | _(from `ATHENA_OUTPUT_S3`)_ | Bucket the Trusted Advisor tool reads `ta/` objects from; the stack sets it |
@@ -381,9 +361,11 @@ CDK stack; the stack sets these for you):
 | `MAX_QUERY_EXECUTION_TIME` | `300` | Athena poll timeout (seconds) |
 | `SYSTEM_PROMPT` | _(built-in, matches es-optira)_ | Drives orchestrator routing between Athena and the KB |
 
-> `KNOWLEDGEBASE_ID` is baked at **deploy time**. If the Knowledge Base is ever
-> recreated (new id in the secret), redeploy the stack so the Lambda picks up
-> the new id.
+> The KB id is resolved from the `optira/knowledge-base-id` secret **at
+> runtime** (once per Lambda cold start), not baked at deploy time. If the
+> Knowledge Base is recreated with a new id, the server picks it up on the next
+> cold start — no redeploy needed. This also means the MCP server can be
+> deployed **before or after** the Knowledge Base exists.
 
 ---
 
@@ -394,52 +376,12 @@ CDK stack; the stack sets these for you):
 | Registration/validation fails: "requires a primary account association" | The Agent Space has no primary AWS account | Associate a primary account whose role can `execute-api:Invoke` the API, then retry |
 | `403` / access denied from DevOps Agent | SigV4 role/trust or `execute-api:Invoke` missing | Confirm you selected `DevOpsAgentInvokeRoleArn`; Region = `SigV4Region`; Service = `execute-api` |
 | `{"message":"Internal server error"}` on the MCP handshake | Function error before a JSON-RPC reply | Check `OptiraMcpServer` CloudWatch logs; verify env vars are set |
-| `406` from the endpoint | Missing `Accept: application/json, text/event-stream` | Only relevant when testing manually; DevOps Agent sends it |
 | Athena error "Unable to verify/create output bucket" | Wrong bucket, or missing `s3:GetBucketLocation` | Deploy with the correct `--bucket`; the stack grants `GetBucketLocation`/`ListBucket` |
 | Athena "no such database/table" or empty results | Core solution not deployed / metadata pipeline not run | Ensure `case_metadata` is populated (run `../es-optira-data-pipeline`) |
 | KB answers say a case "isn't in the sources" or under-counts | RAG retrieves only a bounded set of chunks | Ask via `get_support_insights` (routes counts/lists to Athena); the KB is for narrative, not enumeration |
-| Long queries time out | API Gateway default integration timeout is 29s | Keep queries bounded, or request an integration-timeout quota increase |
+| Long queries time out | API Gateway default integration timeout is 29s | Keep queries bounded, or request an integration-timeout quota increase to 180s |
 
 Reference: [AWS DevOps Agent — Connecting MCP Servers](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-integrations-and-knowledge-connecting-mcp-servers.html).
-
----
-
-## Local development (stdio)
-
-For local iteration you can run the same tool over stdio (no auth, no network
-surface) in any MCP host (Kiro, Claude Desktop, Cursor):
-
-```bash
-# from optira-core/es-optira-mcp
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-
-optira-mcp --transport stdio
-```
-
-Client config:
-
-```json
-{
-  "mcpServers": {
-    "optira-support-insights": {
-      "command": "optira-mcp",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "AWS_REGION": "us-east-1",
-        "ATHENA_DATABASE": "optira_database",
-        "ATHENA_OUTPUT_S3": "s3://<bucket>/results/",
-        "BEDROCK_MODEL_ID": "global.anthropic.claude-opus-4-7",
-        "KNOWLEDGEBASE_ID": "<kb-id>"
-      }
-    }
-  }
-}
-```
-
-`--transport http` is available for local Streamable HTTP testing but performs
-**no authentication** — use it only on a trusted local/private network. The
-authenticated production path is the Lambda + API Gateway (SigV4) deployment.
 
 ---
 
@@ -450,4 +392,3 @@ authenticated production path is the Lambda + API Gateway (SigV4) deployment.
   DevOps Agent service, constrained by account/ARN conditions) can invoke it.
 - **Least privilege:** the Lambda role is scoped to Bedrock, Athena, Glue, and
   the support S3 bucket. The single exposed tool is read-only.
-- **Local stdio:** no network surface; uses the developer's own AWS credentials.

@@ -484,12 +484,44 @@ class OptiraKnowledgeBase:
         return data_source_id
 
     def start_ingestion_job(self, kb_id, data_source_id):
-        """Start ingestion job for the data source"""
-        ingestion_response = self.bedrock_agent.start_ingestion_job(
-            knowledgeBaseId=kb_id,
-            dataSourceId=data_source_id
-        )
-        
+        """Start an ingestion job, tolerating an already-running one.
+
+        Bedrock allows only ONE concurrent ingestion job per knowledge base.
+        On redeploy against an existing KB, a prior job (from an earlier
+        deploy, the data-pipeline Lambda, or the daily refresh) may still be
+        running, which makes StartIngestionJob raise ConflictException. In that
+        case we reuse the in-progress job instead of failing the deployment.
+        """
+        # Reuse an in-progress job if one already exists (avoids the conflict).
+        existing_job_id = self._find_in_progress_ingestion_job(kb_id, data_source_id)
+        if existing_job_id:
+            logger.info(
+                f"An ingestion job is already running (ID: {existing_job_id}); "
+                "reusing it instead of starting a new one"
+            )
+            return existing_job_id
+
+        try:
+            ingestion_response = self.bedrock_agent.start_ingestion_job(
+                knowledgeBaseId=kb_id,
+                dataSourceId=data_source_id
+            )
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'ConflictException':
+                # A job started between our check and this call. Treat the
+                # running job as the result rather than failing the deploy.
+                running_job_id = self._find_in_progress_ingestion_job(
+                    kb_id, data_source_id
+                )
+                logger.warning(
+                    "StartIngestionJob hit ConflictException (max 1 concurrent "
+                    "job per KB); an ingestion is already in progress"
+                    + (f" (ID: {running_job_id})" if running_job_id else "")
+                    + ". Continuing without starting a new job."
+                )
+                return running_job_id
+            raise
+
         ingestion_job_id = ingestion_response['ingestionJob']['ingestionJobId']
         logger.info(f"Started ingestion job with ID: {ingestion_job_id}")
         
@@ -499,6 +531,30 @@ class OptiraKnowledgeBase:
         logger.info(f"You can check ingestion status later with job ID: {ingestion_job_id}")
         
         return ingestion_job_id
+
+    def _find_in_progress_ingestion_job(self, kb_id, data_source_id):
+        """Return the id of a STARTING/IN_PROGRESS ingestion job, or None."""
+        try:
+            response = self.bedrock_agent.list_ingestion_jobs(
+                knowledgeBaseId=kb_id,
+                dataSourceId=data_source_id,
+                filters=[
+                    {
+                        'attribute': 'STATUS',
+                        'operator': 'EQ',
+                        'values': ['STARTING', 'IN_PROGRESS'],
+                    }
+                ],
+                maxResults=10,
+            )
+            jobs = response.get('ingestionJobSummaries', [])
+            if jobs:
+                return jobs[0].get('ingestionJobId')
+        except ClientError as e:
+            logger.warning(
+                f"Could not list ingestion jobs to check for a running one: {e}"
+            )
+        return None
 
     def store_kb_id_in_secrets_manager(self, kb_id, secret_name="optira/knowledge-base-id"):
         """Store knowledge base ID in AWS Secrets Manager"""
