@@ -75,19 +75,27 @@ AWS DevOps Agent ──SigV4──▶ API Gateway (AWS_IAM auth, execute-api)
                            Lambda (non-VPC)
                     FastMCP stateless Streamable HTTP
                                  │
-                          Strands orchestrator
-                          ├── Athena  (case_metadata: exact counts/lists/facts)
-                          └── Bedrock KB (narrative: root cause, resolution, thread)
+             ┌───────────────────┴────────────────────────┐
+             ▼                                            ▼
+   get_support_insights                   get_trusted_advisor_recommendations
+   Strands orchestrator                   reads collector output directly
+   ├── Athena    (case_metadata:          └── S3  (ta/{account}/{check}.json:
+   │              counts/lists/facts)              flagged resources + ARNs)
+   └── Bedrock KB (narrative: root
+                   cause, resolution, thread)
 ```
 
 - AWS DevOps Agent requires the **Streamable HTTP** transport and one of its
   supported auth methods; this server uses **AWS SigV4** validated by API
   Gateway's `AWS_IAM` authorization.
-- A **non-VPC Lambda** reaches Bedrock/Athena/KB over the AWS network — no NAT
+- A **non-VPC Lambda** reaches Bedrock/Athena/KB/S3 over the AWS network — no NAT
   gateway, no ALB, no 24/7 compute, so fixed cost is ~$0 and it scales to zero.
-- Inside the Lambda, the **Strands orchestrator** decides per question whether
-  to use Athena or the Knowledge Base (or both), mirroring the es-optira agent
-  Lambda.
+- `get_support_insights` runs the **Strands orchestrator**, which decides per
+  question whether to use Athena or the Knowledge Base (or both), mirroring the
+  es-optira agent Lambda.
+- `get_trusted_advisor_recommendations` **bypasses the orchestrator** and reads
+  the collector's `ta/` objects straight from S3 — Trusted Advisor data is not
+  in Athena or the Knowledge Base.
 
 ## Tools
 
@@ -99,15 +107,8 @@ task so the agent can't pick the wrong data source.
 | `get_support_insights` | Runs the Optira orchestrator over any natural-language **support-case** question. Uses **Athena** for exact counts/lists/facts and the **Bedrock Knowledge Base** for narrative, combining both when needed. | `{ "answer": "<synthesized text>" }` |
 | `get_trusted_advisor_recommendations` | Lists actionable **Trusted Advisor** recommendations (warning/error) collected across the org's accounts, including the exact **flagged resources** to remediate. Reads the collector's `ta/` objects from S3. | `{ count, total_available, truncated, recommendations: [ { account_id, check_id, status, description, flagged_resources_count, flagged_resources } ] }` |
 
-- Use `get_support_insights` for support-case questions (counts, lists, root
-  cause, resolution, communication history).
-- Use `get_trusted_advisor_recommendations` when the agent needs Trusted Advisor
-  findings and the specific resources to act on (remediation). Optionally scope
-  to one account via `account_id`.
-
-Note: Trusted Advisor data is **not** in the Knowledge Base or Athena — it is
-read directly from the `ta/` prefix in the support data S3 bucket, which the
-collector populates.
+`get_trusted_advisor_recommendations` optionally scopes to one account via
+`account_id`.
 
 ---
 
@@ -120,10 +121,10 @@ target Region (default `us-east-1`).
 ### A. Shared data foundation is deployed (required)
 
 The MCP server does not create data — it reads what the shared data components
-produce (`../es-optira-collector` + `../es-optira-kb` +
-`../es-optira-data-pipeline`). The **REST API stack (`../es-optira`) is NOT
-required** for the MCP server. Confirm each of these exists in the target
-account/Region:
+produce (`../es-optira-collector`, `../es-optira-kb`, and
+`../es-optira-data-pipeline`, described above). Deploy all of them at once by
+running `../deploy.sh` from `optira-core/`. Then confirm each of these exists in
+the target account/Region:
 
 - [ ] **Support data S3 bucket** containing case JSON under `support-cases/`.
   ```bash
@@ -144,10 +145,8 @@ account/Region:
     --query SecretString --output text --region <region>
   ```
 
-  If any are missing, deploy the data foundation first. Running `../deploy.sh`
-  from `optira-core/` deploys all core components (including the optional REST
-  API); to deploy only the data foundation and skip the REST API, see
-  [Deploying MCP standalone](#deploying-mcp-standalone-without-the-rest-api).
+  If any are missing, run `../deploy.sh` from `optira-core/` to deploy the data
+  foundation before continuing.
 
 ### B. AWS account and Bedrock access (required)
 
@@ -335,11 +334,6 @@ For **Trusted Advisor remediation**, the agent uses
 
 - "What Trusted Advisor issues need remediation across our accounts?"
 - "List Trusted Advisor findings for account 123456789012 and the resources to fix."
-
-The agent picks the right tool for the question — `get_support_insights` for
-support-case Q&A (routing internally to Athena/KB), and
-`get_trusted_advisor_recommendations` for Trusted Advisor findings and the
-flagged resources to act on.
 
 ---
 

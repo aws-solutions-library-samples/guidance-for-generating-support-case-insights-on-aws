@@ -199,7 +199,11 @@ export class OptiraAgentLambdaStack extends Stack {
     // Change time out explicitly to 180s since script not allowing to go beyond 29s
     items.addMethod('POST', new apigateway.LambdaIntegration(OptiraAgentFunction, {
       proxy: true
-    }));
+    }), {
+      // Require a valid x-api-key; without this the usage plan meters but does
+      // not enforce the key, leaving the endpoint publicly invokable.
+      apiKeyRequired: true
+    });
 
     // Create a usage plan
     const plan = api.addUsagePlan('StandardUsagePlan', {
