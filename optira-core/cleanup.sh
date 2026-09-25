@@ -32,6 +32,9 @@ aws cloudformation delete-stack --stack-name OptiraAgentLambdaStack --region $RE
 aws cloudformation delete-stack --stack-name OptiraDataPipelineStack --region $REGION 2>/dev/null || true
 aws cloudformation delete-stack --stack-name OptiraAgentStack --region $REGION 2>/dev/null || true
 aws cloudformation delete-stack --stack-name OptiraStack --region $REGION 2>/dev/null || true
+# MCP server (optional standalone stack). Delete the stack first so its Lambda
+# and IAM roles are not orphaned by the generic Optira-name sweep below.
+aws cloudformation delete-stack --stack-name OptiraMcpServerStack --region $REGION 2>/dev/null || true
 
 # Also delete from us-west-2 (common default region)
 if [ "$REGION" != "us-west-2" ]; then
@@ -43,6 +46,7 @@ if [ "$REGION" != "us-west-2" ]; then
     aws cloudformation delete-stack --stack-name OptiraDataPipelineStack --region us-west-2 2>/dev/null || true
     aws cloudformation delete-stack --stack-name OptiraAgentStack --region us-west-2 2>/dev/null || true
     aws cloudformation delete-stack --stack-name OptiraStack --region us-west-2 2>/dev/null || true
+    aws cloudformation delete-stack --stack-name OptiraMcpServerStack --region us-west-2 2>/dev/null || true
 fi
 
 # Force destroy CDK cached state in each component

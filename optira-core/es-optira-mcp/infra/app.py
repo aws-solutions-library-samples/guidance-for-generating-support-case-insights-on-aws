@@ -3,7 +3,7 @@
 
 Architecture (serverless, scale-to-zero):
 
-    AWS DevOps Agent --SigV4--> API Gateway (AWS_IAM auth, execute-api)
+    AWS DevOps Agent --SigV4--> Lambda Function URL (AWS_IAM auth, service=lambda)
                                      |
                                      v
                               Lambda (non-VPC)
@@ -13,17 +13,18 @@ Architecture (serverless, scale-to-zero):
 
 Why this shape:
 - AWS DevOps Agent requires the Streamable HTTP transport and SigV4 auth.
-- API Gateway with AWS_IAM authorization validates the SigV4 signature and the
-  caller's IAM permissions before the request reaches Lambda.
+- A Lambda Function URL with AWS_IAM auth accepts only SigV4-signed requests from
+  principals allowed to lambda:InvokeFunctionUrl.
 - A non-VPC Lambda reaches the AWS service endpoints without a NAT gateway.
-- No ALB, no NAT, no 24/7 Fargate task -> ~$0 fixed cost.
+- Serverless with no always-on infrastructure, so there is no idle cost; usage
+  (Lambda, Bedrock, Athena, S3, CloudWatch) is billed per request.
 
 Deploy:
     python3 bin/package_for_lambda.py          # build app.zip + dependencies.zip
     cdk deploy --app "python3 app.py <support_bucket_name>" --require-approval never
 
 Register the ``McpEndpointUrl`` output in the DevOps Agent console using AWS
-SigV4 auth (Region from output, service name ``execute-api``) and the
+SigV4 auth (Region from output, service name ``lambda``) and the
 ``DevOpsAgentInvokeRoleArn`` role.
 """
 import os
@@ -33,7 +34,6 @@ from aws_cdk import (
     CfnOutput,
     Duration,
     Stack,
-    aws_apigateway as apigw,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_secretsmanager as secretsmanager,
@@ -58,7 +58,7 @@ SYSTEM_PROMPT = (
 
 
 class OptiraMcpServerStack(Stack):
-    """Lambda + API Gateway (SigV4/IAM) MCP server for AWS DevOps Agent."""
+    """Lambda + Function URL (SigV4/IAM) MCP server for AWS DevOps Agent."""
 
     def __init__(
         self,
@@ -184,32 +184,13 @@ class OptiraMcpServerStack(Stack):
         )
         kb_secret.grant_read(mcp_function)
 
-        # --- API Gateway with SigV4/IAM authorization ------------------------
-        api = apigw.RestApi(
-            self,
-            "OptiraMcpApi",
-            rest_api_name="OptiraMcpApi",
-            description="Optira MCP server endpoint (SigV4/IAM) for AWS DevOps Agent",
-            endpoint_configuration=apigw.EndpointConfiguration(
-                types=[apigw.EndpointType.REGIONAL]
-            ),
-            deploy_options=apigw.StageOptions(
-                stage_name="prod",
-                logging_level=apigw.MethodLoggingLevel.INFO,
-            ),
-            cloud_watch_role=True,
+        # --- Lambda Function URL with AWS_IAM (SigV4) authorization ----------
+        # AWS_IAM auth: the Function URL accepts only SigV4-signed requests from
+        # principals allowed to lambda:InvokeFunctionUrl. FastMCP serves the
+        # Streamable HTTP endpoint at the /mcp path inside the function.
+        mcp_function_url = mcp_function.add_function_url(
+            auth_type=lambda_.FunctionUrlAuthType.AWS_IAM,
         )
-
-        mcp_resource = api.root.add_resource("mcp")
-        integration = apigw.LambdaIntegration(mcp_function, proxy=True)
-        # Streamable HTTP primarily uses POST; GET/DELETE are included so any
-        # compliant client probe is authenticated rather than anonymously 4xx'd.
-        for method in ("POST", "GET", "DELETE"):
-            mcp_resource.add_method(
-                method,
-                integration,
-                authorization_type=apigw.AuthorizationType.IAM,
-            )
 
         # --- IAM role that AWS DevOps Agent assumes to SigV4-sign requests ---
         # Trust policy per the DevOps Agent docs: only the aidevops service
@@ -234,18 +215,29 @@ class OptiraMcpServerStack(Stack):
                 },
             ),
         )
+        # A Function URL caller needs BOTH lambda:InvokeFunctionUrl (to satisfy
+        # the URL's AWS_IAM auth type) AND lambda:InvokeFunction (to actually
+        # invoke the function). Granting only InvokeFunctionUrl returns HTTP 403.
         devops_agent_role.add_to_policy(
             iam.PolicyStatement(
-                actions=["execute-api:Invoke"],
-                resources=[api.arn_for_execute_api()],
+                actions=["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"],
+                resources=[mcp_function.function_arn],
             )
+        )
+        # Resource-based policy: permit the agent role to invoke the URL under
+        # AWS_IAM auth (mirrors the DevOps Agent reference sample).
+        mcp_function.add_permission(
+            "DevOpsAgentInvokeUrlPermission",
+            principal=iam.ArnPrincipal(devops_agent_role.role_arn),
+            action="lambda:InvokeFunctionUrl",
+            function_url_auth_type=lambda_.FunctionUrlAuthType.AWS_IAM,
         )
 
         # --- Outputs needed for DevOps Agent registration --------------------
         CfnOutput(
             self,
             "McpEndpointUrl",
-            value=f"{api.url}mcp",
+            value=f"{mcp_function_url.url}mcp",
             description="MCP Streamable HTTP endpoint to register in AWS DevOps Agent",
         )
         CfnOutput(
@@ -257,7 +249,7 @@ class OptiraMcpServerStack(Stack):
         CfnOutput(
             self,
             "SigV4Service",
-            value="execute-api",
+            value="lambda",
             description="Service name to enter in the DevOps Agent SigV4 config",
         )
         CfnOutput(

@@ -30,22 +30,17 @@ depend on each other.
 
 Both sit on top of the same **shared data foundation**:
 
-- `../es-optira-collector` — pulls support cases and Trusted Advisor
-  recommendations from the Support API into S3 (`support-cases/` and `ta/`).
+- `../es-optira-collector` — pulls support cases (Support API) and Trusted
+  Advisor recommendations (Trusted Advisor API) into S3 (`support-cases/` and
+  `ta/`).
 - `../es-optira-kb` — creates the Bedrock Knowledge Base and writes the
   `optira/knowledge-base-id` secret.
 - `../es-optira-data-pipeline` — builds the `case_metadata` Athena table and
   triggers KB ingestion.
 
-What this means for deployment:
-
-- **The data foundation (the three components above) is required for either
-  interface.**
-- **The REST API stack (`../es-optira`) is NOT required to run the MCP server**,
-  and the MCP stack is not required to run the REST API.
-- To run **MCP standalone**, deploy the data foundation + this package and
-  **skip `../es-optira`** entirely. See
-  [Deploying MCP standalone](#deploying-mcp-standalone-without-the-rest-api).
+The data foundation is required for either interface. The REST API and MCP
+stacks are independent — deploy either, both, or just the MCP server on top of
+the data foundation.
 
 ---
 
@@ -63,33 +58,22 @@ What this means for deployment:
 10. [Configuration reference](#configuration-reference)
 11. [Troubleshooting](#troubleshooting)
 12. [Security](#security)
+13. [Cleanup](#cleanup)
+14. [Disclaimer](#disclaimer)
 
 ---
 
 ## How it works
 
-```
-AWS DevOps Agent ──SigV4──▶ API Gateway (AWS_IAM auth, execute-api)
-                                 │
-                                 ▼
-                           Lambda (non-VPC)
-                    FastMCP stateless Streamable HTTP
-                                 │
-             ┌───────────────────┴────────────────────────┐
-             ▼                                            ▼
-   get_support_insights                   get_trusted_advisor_recommendations
-   Strands orchestrator                   reads collector output directly
-   ├── Athena    (case_metadata:          └── S3  (ta/{account}/{check}.json:
-   │              counts/lists/facts)              flagged resources + ARNs)
-   └── Bedrock KB (narrative: root
-                   cause, resolution, thread)
-```
+![Optira MCP server flow architecture](../../img/MCPFlowArchitecture.png)
 
 - AWS DevOps Agent requires the **Streamable HTTP** transport and one of its
-  supported auth methods; this server uses **AWS SigV4** validated by API
-  Gateway's `AWS_IAM` authorization.
+  supported auth methods; this server uses **AWS SigV4**, validated by the
+  Lambda Function URL's `AWS_IAM` auth type.
 - A **non-VPC Lambda** reaches Bedrock/Athena/KB/S3 over the AWS network — no NAT
-  gateway, no ALB, no 24/7 compute, so fixed cost is ~$0 and it scales to zero.
+  gateway, no ALB, and no always-on compute, so there is no idle cost when it is
+  not in use. You still pay per use (Lambda invocations, Bedrock inference,
+  Athena queries, S3, CloudWatch).
 - `get_support_insights` runs the **Strands orchestrator**, which decides per
   question whether to use Athena or the Knowledge Base (or both), mirroring the
   es-optira agent Lambda.
@@ -179,8 +163,8 @@ the target account/Region:
 ### E. Deployer IAM permissions (required)
 
 The identity running the deploy needs permission to create/update the stack's
-resources, at minimum: CloudFormation, IAM (roles/policies), Lambda (+layers),
-API Gateway, and read access to the `optira/knowledge-base-id` secret. Admin or
+resources, at minimum: CloudFormation, IAM (roles/policies), Lambda (+layers and
+Function URL), and read access to the `optira/knowledge-base-id` secret. Admin or
 a power-user role in a non-production account is simplest; scope down for
 production.
 
@@ -196,23 +180,8 @@ production.
 
 ## Step 1 — Deploy the MCP server
 
-The `infra/` folder contains a Python CDK stack, `OptiraMcpServerStack`.
-
-### Deploying MCP standalone (without the REST API)
-
-The MCP server is an alternative to the REST API (`../es-optira`), not an
-add-on to it. To run **only the MCP interface**:
-
-1. Deploy the **shared data foundation** (once) by running `../deploy.sh` from
-   `optira-core/`. This produces the S3 data, the `case_metadata` table, and the
-   `optira/knowledge-base-id` secret.
-2. Deploy this package (Step 1 below). It stands entirely on its own on top of
-   the data foundation.
-
-You can also deploy **both** interfaces side by side — they are independent and
-share only the data foundation. Nothing here changes or requires the REST API.
-
-### Deploy
+The `infra/` folder contains a Python CDK stack, `OptiraMcpServerStack`. Make
+sure the data foundation is deployed first (see Prerequisites A).
 
 ```bash
 # from optira-core/es-optira-mcp
@@ -228,10 +197,10 @@ After deploy, note these CloudFormation outputs (also printed by `deploy.sh`):
 
 | Output | Use in registration |
 |---|---|
-| `McpEndpointUrl` | The endpoint to register, e.g. `https://<api-id>.execute-api.<region>.amazonaws.com/prod/mcp` |
+| `McpEndpointUrl` | The endpoint to register, e.g. `https://<url-id>.lambda-url.<region>.on.aws/mcp` |
 | `DevOpsAgentInvokeRoleArn` | The IAM role AWS DevOps Agent assumes to SigV4-sign requests |
 | `SigV4Region` | The Region to enter for SigV4 signing |
-| `SigV4Service` | `execute-api` |
+| `SigV4Service` | `lambda` |
 
 You can also fetch them later:
 
@@ -254,8 +223,8 @@ Registration is **account-level** (shared across Agent Spaces in the account).
    - **Endpoint URL**: the `McpEndpointUrl` output (must end in `/mcp`)
    - **Description** (optional): "Optira AWS support-case insights"
    - Leave **Dynamic Client Registration** unchecked (not used for SigV4).
-   - Leave **private connection** unchecked (the endpoint is reached over the
-     public API Gateway endpoint, gated by SigV4/IAM).
+   - Leave **private connection** unchecked (the endpoint is the public Lambda
+     Function URL, gated by SigV4/IAM).
    - Choose **Next**.
 4. **Authentication method**: select **AWS SigV4** → **Next**.
 5. **Authorization configuration**:
@@ -263,9 +232,10 @@ Registration is **account-level** (shared across Agent Spaces in the account).
      `DevOpsAgentInvokeRoleArn` from the stack outputs. Its trust policy already
      allows the `aidevops.amazonaws.com` service principal (with
      `aws:SourceAccount` / `aws:SourceArn` confused-deputy conditions) and it
-     has `execute-api:Invoke` on the API.
+     has `lambda:InvokeFunctionUrl` **and** `lambda:InvokeFunction` on the
+     function.
    - **AWS Region**: the `SigV4Region` value (e.g. `us-east-1`).
-   - **Service Name**: `execute-api`.
+   - **Service Name**: `lambda`.
    - Leave **Custom Headers** empty.
    - Choose **Next**.
 6. **Review and submit** → **Submit**. DevOps Agent validates the connection by
@@ -367,13 +337,13 @@ CDK stack; the stack sets these for you):
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Registration/validation fails: "requires a primary account association" | The Agent Space has no primary AWS account | Associate a primary account whose role can `execute-api:Invoke` the API, then retry |
-| `403` / access denied from DevOps Agent | SigV4 role/trust or `execute-api:Invoke` missing | Confirm you selected `DevOpsAgentInvokeRoleArn`; Region = `SigV4Region`; Service = `execute-api` |
+| Registration/validation fails: "requires a primary account association" | The Agent Space has no primary AWS account | Associate a primary account whose role can `lambda:InvokeFunctionUrl`, then retry |
+| `403 Forbidden` from the Function URL during registration | The invoke role is missing `lambda:InvokeFunction` (needs **both** `InvokeFunctionUrl` and `InvokeFunction`), or the resource-based permission is absent | Redeploy so the role grants both actions and the function has the `AWS_IAM` `AWS::Lambda::Permission`; confirm Region = `SigV4Region` and Service = `lambda` |
 | `{"message":"Internal server error"}` on the MCP handshake | Function error before a JSON-RPC reply | Check `OptiraMcpServer` CloudWatch logs; verify env vars are set |
 | Athena error "Unable to verify/create output bucket" | Wrong bucket, or missing `s3:GetBucketLocation` | Deploy with the correct `--bucket`; the stack grants `GetBucketLocation`/`ListBucket` |
 | Athena "no such database/table" or empty results | Core solution not deployed / metadata pipeline not run | Ensure `case_metadata` is populated (run `../es-optira-data-pipeline`) |
 | KB answers say a case "isn't in the sources" or under-counts | RAG retrieves only a bounded set of chunks | Ask via `get_support_insights` (routes counts/lists to Athena); the KB is for narrative, not enumeration |
-| Long queries time out | API Gateway default integration timeout is 29s | Keep queries bounded, or request an integration-timeout quota increase to 180s |
+| Long queries time out | The Lambda function timeout (300s) was exceeded | Keep queries bounded; if needed, raise the function `timeout` in `infra/app.py` (Function URLs allow up to 15 min) |
 
 Reference: [AWS DevOps Agent — Connecting MCP Servers](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-integrations-and-knowledge-connecting-mcp-servers.html).
 
@@ -381,8 +351,33 @@ Reference: [AWS DevOps Agent — Connecting MCP Servers](https://docs.aws.amazon
 
 ## Security
 
-- **Production (DevOps Agent):** access is gated by **SigV4 + IAM** at API
-  Gateway. Only principals that can assume `DevOpsAgentInvokeRoleArn` (the AWS
-  DevOps Agent service, constrained by account/ARN conditions) can invoke it.
-- **Least privilege:** the Lambda role is scoped to Bedrock, Athena, Glue, and
-  the support S3 bucket. The single exposed tool is read-only.
+- **Production (DevOps Agent):** access is gated by **SigV4 + IAM** on the
+  Lambda Function URL (`AWS_IAM` auth type). Only principals that can assume
+  `DevOpsAgentInvokeRoleArn` (the AWS DevOps Agent service, constrained by
+  account/ARN conditions) and hold `lambda:InvokeFunctionUrl` +
+  `lambda:InvokeFunction` can invoke it.
+- **Least privilege:** the Lambda role is scoped to Bedrock, Athena, Glue, the
+  support S3 bucket, and read access to the `optira/knowledge-base-id` secret.
+  Both exposed tools are read-only.
+
+---
+
+## Cleanup
+
+The MCP server is a standalone stack, so tear it down on its own — this does not
+touch the shared data foundation or the REST API:
+
+```bash
+aws cloudformation delete-stack --stack-name OptiraMcpServerStack --region <region>
+```
+
+This removes the Lambda, its Function URL, the layer, and the two IAM roles.
+The support S3 bucket, Athena table, Knowledge Base, and the
+`optira/knowledge-base-id` secret are owned by the data foundation and are left
+intact.
+
+---
+
+## Disclaimer
+
+The sample code provided in this solution is for educational purposes only. Users should thoroughly test and validate the solution before deploying it in a production environment.

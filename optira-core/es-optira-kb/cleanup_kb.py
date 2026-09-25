@@ -6,7 +6,7 @@ NOT managed by CloudFormation (they are created via boto3 with a random
 suffix): an OpenSearch Serverless collection ``bedrock-kb-<suffix>`` and its
 policies ``kb-enc-<suffix>`` (encryption), ``kb-net-<suffix>`` (network) and
 ``kb-data-<suffix>`` (data access), plus possibly a FAILED Bedrock Knowledge
-Base named ``optira-support-case-kb-sept22`` and a stale KB id in the
+Base named ``optira-support-case-kb`` and a stale KB id in the
 ``optira/knowledge-base-id`` secret.
 
 This helper removes those orphans. It is **dry-run by default** -- it only
@@ -28,7 +28,7 @@ import time
 
 import boto3
 
-DEFAULT_KB_NAME = "optira-support-case-kb-sept22"
+DEFAULT_KB_NAME = "optira-support-case-kb"
 COLLECTION_PREFIX = "bedrock-kb-"
 POLICY_PREFIXES = ("kb-enc-", "kb-net-", "kb-data-")
 KB_SECRET_NAME = "optira/knowledge-base-id"
