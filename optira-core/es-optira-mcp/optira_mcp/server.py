@@ -4,8 +4,8 @@ Runs the Optira MCP tools over either stdio (local hosts) or Streamable HTTP
 (local/private hosting). Tool registration lives in ``mcp_server.build_server``
 so the CLI and the AWS Lambda handler share exactly the same tools.
 
-For the AWS DevOps Agent integration, the tools are served from Lambda behind
-API Gateway (SigV4) -- see ``lambda_handler.py`` and ``infra/``. This CLI is for
+For the AWS DevOps Agent integration, the tools are served from Lambda behind a
+Function URL (SigV4) -- see ``lambda_handler.py`` and ``infra/``. This CLI is for
 local development and stdio-based MCP hosts.
 
 Usage:
@@ -61,8 +61,8 @@ def main() -> None:
     if args.transport == "http":
         # SECURITY: this CLI HTTP mode performs no authentication. Use it only
         # for local development or on a trusted private network. The production
-        # DevOps Agent deployment enforces SigV4/IAM at API Gateway instead
-        # (see lambda_handler.py + infra/).
+        # DevOps Agent deployment enforces SigV4/IAM on the Lambda Function URL
+        # instead (see lambda_handler.py + infra/).
         mcp.settings.host = args.host
         mcp.settings.port = args.port
         mcp.run(transport="streamable-http")

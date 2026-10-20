@@ -1,16 +1,18 @@
 """FastMCP server construction shared by every runtime.
 
-``build_server`` registers a SINGLE public MCP tool -- ``get_support_insights``
--- on a FastMCP instance. It is reused by:
+``build_server`` registers the two public MCP tools -- ``get_support_insights``
+and ``get_trusted_advisor_recommendations`` -- on a FastMCP instance. It is
+reused by:
 - the CLI (``server.py``) for stdio / local streamable-HTTP, and
-- the AWS Lambda handler (``lambda_handler.py``) for the API Gateway (SigV4)
+- the AWS Lambda handler (``lambda_handler.py``) for the Function URL (SigV4)
   deployment used by AWS DevOps Agent.
 
-Only one tool is exposed on purpose: it delegates to the Strands orchestrator,
-which internally decides whether to use case metadata (Athena) or the Knowledge
-Base for each question -- mirroring the deployed Optira agent Lambda. This
-prevents callers from picking the wrong low-level tool (e.g. trying to count
-cases via the Knowledge Base, which cannot enumerate).
+The tools are purpose-built rather than low-level. ``get_support_insights``
+delegates to the Strands orchestrator, which decides per question whether to use
+case metadata (Athena) or the Knowledge Base -- mirroring the deployed Optira
+agent Lambda. This keeps callers from picking the wrong data source (e.g. trying
+to count cases via the Knowledge Base, which cannot enumerate). Trusted Advisor
+is a separate tool because its data lives in S3, not in Athena or the KB.
 """
 from __future__ import annotations
 
@@ -32,7 +34,7 @@ def build_server(
     json_response: bool = False,
     trust_proxy_host: bool = False,
 ) -> FastMCP:
-    """Create a FastMCP server exposing the single Optira insights tool.
+    """Create a FastMCP server exposing the Optira MCP tools.
 
     Args:
         stateless_http: When True, each request is fully self-contained (no
@@ -40,13 +42,14 @@ def build_server(
             can land on any execution environment.
         json_response: When True, streamable-HTTP responses are returned as a
             single ``application/json`` body instead of an SSE stream. This is
-            what lets the server run behind API Gateway + Lambda (buffered
-            request/response) via an ASGI adapter.
+            what lets the server run on Lambda (buffered request/response),
+            reached through the Function URL via an ASGI adapter.
         trust_proxy_host: When True, disables FastMCP's DNS-rebinding (Host
             header) protection. Use this only when the server sits behind a
-            trusted front door that authenticates callers -- e.g. API Gateway
-            with SigV4/IAM -- where the Host header is the gateway domain and
-            the browser-oriented rebinding threat does not apply.
+            trusted front door that authenticates callers -- e.g. a Lambda
+            Function URL with SigV4/IAM -- where the Host header is the
+            function-url domain and the browser-oriented rebinding threat does
+            not apply.
     """
     transport_security = None
     if trust_proxy_host:

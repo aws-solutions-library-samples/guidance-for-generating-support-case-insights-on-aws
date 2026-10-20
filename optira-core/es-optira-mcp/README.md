@@ -1,11 +1,19 @@
-# Optira MCP Server — AWS DevOps Agent Onboarding Guide
+# Optira MCP Server
 
-Exposes Optira's AWS support-case and Trusted Advisor insights as a
-[Model Context Protocol](https://modelcontextprotocol.io) (MCP) server so it can
-be registered as a **capability provider** in **AWS DevOps Agent**. The agent
-can then answer support-case questions (counts, lists, root cause, resolution,
-communication history) and pull Trusted Advisor recommendations to remediate,
-during its investigations.
+## Overview
+
+A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that
+exposes Optira's AWS support-case and Trusted Advisor insights as two
+purpose-built, read-only tools — `get_support_insights` and
+`get_trusted_advisor_recommendations`. Any MCP-compatible host can call these
+tools over the Streamable HTTP transport.
+
+This guide covers the **AWS DevOps Agent** integration: the server is deployed to
+AWS Lambda behind a Function URL (SigV4/IAM auth) and registered as a capability
+provider, so the agent can answer support-case questions (counts, lists, root
+cause, resolution, communication history) and pull Trusted Advisor
+recommendations during its investigations. The server is not specific to DevOps
+Agent, though — it works with any MCP host that supports Streamable HTTP.
 
 This package is **standalone and opt-in**. It does not modify any other Optira
 component — it reuses the same S3 bucket, Athena table, and Knowledge Base the
@@ -46,20 +54,21 @@ the data foundation.
 
 ## Contents
 
-1. [Choose your interface: REST API or MCP](#choose-your-interface-rest-api-or-mcp)
-2. [How it works](#how-it-works)
-3. [Tools](#tools)
-4. [Prerequisites](#prerequisites)
-5. [Step 1 — Deploy the MCP server](#step-1--deploy-the-mcp-server)
-6. [Step 2 — Register the MCP server in AWS DevOps Agent](#step-2--register-the-mcp-server-in-aws-devops-agent)
-7. [Step 3 — Add the server to an Agent Space](#step-3--add-the-server-to-an-agent-space)
-8. [Step 4 — Guide the agent with knowledge](#step-4--guide-the-agent-with-knowledge)
-9. [Step 5 — Ask the agent](#step-5--ask-the-agent)
-10. [Configuration reference](#configuration-reference)
-11. [Troubleshooting](#troubleshooting)
-12. [Security](#security)
-13. [Cleanup](#cleanup)
-14. [Disclaimer](#disclaimer)
+1. [Overview](#overview)
+2. [Choose your interface: REST API or MCP](#choose-your-interface-rest-api-or-mcp)
+3. [How it works](#how-it-works)
+4. [Tools](#tools)
+5. [Prerequisites](#prerequisites)
+6. [Step 1 — Deploy the MCP server](#step-1--deploy-the-mcp-server)
+7. [Step 2 — Register the MCP server in AWS DevOps Agent](#step-2--register-the-mcp-server-in-aws-devops-agent)
+8. [Step 3 — Add the server to an Agent Space](#step-3--add-the-server-to-an-agent-space)
+9. [Step 4 — Guide the agent with knowledge](#step-4--guide-the-agent-with-knowledge)
+10. [Step 5 — Ask the agent](#step-5--ask-the-agent)
+11. [Configuration reference](#configuration-reference)
+12. [Troubleshooting](#troubleshooting)
+13. [Security](#security)
+14. [Cleanup](#cleanup)
+15. [Disclaimer](#disclaimer)
 
 ---
 
@@ -90,9 +99,6 @@ task so the agent can't pick the wrong data source.
 |---|---|---|
 | `get_support_insights` | Runs the Optira orchestrator over any natural-language **support-case** question. Uses **Athena** for exact counts/lists/facts and the **Bedrock Knowledge Base** for narrative, combining both when needed. | `{ "answer": "<synthesized text>" }` |
 | `get_trusted_advisor_recommendations` | Lists actionable **Trusted Advisor** recommendations (warning/error) collected across the org's accounts, including the exact **flagged resources** to remediate. Reads the collector's `ta/` objects from S3. | `{ count, total_available, truncated, recommendations: [ { account_id, check_id, status, description, flagged_resources_count, flagged_resources } ] }` |
-
-`get_trusted_advisor_recommendations` optionally scopes to one account via
-`account_id`.
 
 ---
 

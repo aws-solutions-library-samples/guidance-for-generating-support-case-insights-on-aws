@@ -1,14 +1,16 @@
 """Optira MCP server package.
 
-Exposes the Optira AWS support-case insight capabilities as Model Context
+Exposes Optira's AWS support-case and Trusted Advisor insights as Model Context
 Protocol (MCP) tools so any MCP-compatible host can drive them:
 
-- ``query_support_case_metadata`` -- natural language -> Athena SQL over case metadata
-- ``search_support_knowledge``   -- RAG over the Bedrock Knowledge Base
-- ``get_support_insights``       -- optional composite Strands orchestrator
+- ``get_support_insights``                -- natural-language support-case Q&A;
+  runs the Strands orchestrator over Athena (case metadata) and the Bedrock
+  Knowledge Base.
+- ``get_trusted_advisor_recommendations`` -- actionable Trusted Advisor findings
+  and flagged resources, read from the collector's S3 output.
 
-This package is standalone and does NOT modify or depend on the existing
-Lambda/API Gateway deployment (``es-optira``).
+This package is standalone: it does not modify the es-optira REST API or the
+other core Optira stacks; it only reads the data they produce.
 """
 
 __version__ = "0.1.0"

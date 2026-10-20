@@ -1,8 +1,9 @@
-"""Optional composite tool: the Strands orchestrator.
+"""The Strands orchestrator behind ``get_support_insights``.
 
-Reproduces the behavior of the existing Lambda handler (an ``Agent`` with the
-two capabilities registered as tools, driven by the same system prompt). Kept
-separate so the granular MCP tools do not require Strands at import time.
+Reproduces the es-optira agent Lambda: a Strands ``Agent`` with the two
+capabilities (case metadata + knowledge base) registered as tools and driven by
+the same system prompt. ``get_support_insights`` imports this lazily, so building
+the MCP server never requires Strands until the orchestrator is actually run.
 """
 from __future__ import annotations
 
