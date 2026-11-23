@@ -313,6 +313,20 @@ For **Trusted Advisor remediation**, the agent uses
 
 ---
 
+## Examples: build on the server with DevOps Agent
+
+Once the server is registered, [`examples/devops-agent`](examples/devops-agent/)
+shows how to turn its tools into a repeatable reliability workflow:
+
+- **[`skills/support-and-ta`](examples/devops-agent/skills/support-and-ta/)** — a
+  skill that produces a combined report: top 5 services by support case volume,
+  critical (error/red) Trusted Advisor findings, and the overlap, all per account.
+- **[`custom-agents/support-and-ta-report`](examples/devops-agent/custom-agents/support-and-ta-report/)** —
+  a custom agent that runs the skill on a schedule and maintains a single
+  "Daily Support & Trusted Advisor Report" artifact with a tiered Improvements list.
+
+---
+
 ## Configuration reference
 
 All settings come from environment variables on the Lambda (defaults mirror the
